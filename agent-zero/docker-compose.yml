@@ -1,0 +1,9 @@
+services:
+  agent-zero:
+    image: agent0ai/agent-zero:latest
+    container_name: agent-zero
+    restart: always
+    ports:
+      - "50080:80"
+    volumes:
+      - ./data:/a0/usr
