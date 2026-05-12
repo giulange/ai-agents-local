@@ -310,6 +310,64 @@ SMOKE TEST PASSATO
 
 ---
 
+## 11. Fondazione da agents-ai
+
+Porting e adattamento dei servizi core da `~/git/agents-ai` al nuovo sistema multi-agente.
+
+### Repo di origine
+
+```bash
+cd ~/git
+git clone --no-single-branch git@github.com:giulange/agents-ai.git
+```
+
+### File creati in `agno/`
+
+| File | Origine | Modifiche principali |
+|---|---|---|
+| `config.py` | `agents-ai/src/agents_ai/config.py` | Rimosso OpenAI come primario; aggiunti `OLLAMA_*`, `ANTHROPIC_API_KEY`, `REPOS_BASE_DIR`; OpenAI conservato opzionale per audio |
+| `agno_service.py` | `agents-ai/src/agents_ai/agno_service.py` | Modello → Ollama qwen2.5:7b; include `AgentInput`/`build_agent_input` (erano in `agent.py`); classe rinominata `ChiefOrchestratorGateway`; step 1: sarà wrappato in `agno.team.Team` |
+| `telegram_service.py` | `agents-ai/src/agents_ai/telegram_service.py` | Rimossa dipendenza da `agent.py`; importa da `agno_service`; messaggi adattati in italiano |
+
+> `agent.py` e `main.py` non sono portati: saranno riscritti con l'architettura multi-agente.
+
+### Nota PYTHONPATH
+
+La cartella `agno/` ha lo stesso nome del pacchetto `agno` installato nel venv.
+Per evitare conflitti, i moduli usano import assoluti e il loader aggiunge `agno/` al `PYTHONPATH`:
+
+```bash
+# Già incluso in scripts/activate.sh
+export PYTHONPATH="~/git/ai-agents-local/agno:$PYTHONPATH"
+```
+
+### Dipendenze aggiuntive
+
+Rispetto a agents-ai, aggiunte a `requirements.txt`:
+
+```bash
+# Wheel precompilata necessaria su CentOS 7 (gcc 4.8 non supporta C++20 per greenlet)
+.venv/bin/pip install greenlet --only-binary=:all:
+
+.venv/bin/pip install "python-telegram-bot==21.11.1" "sqlalchemy>=2.0.0,<3.0.0" httpx ddgs
+```
+
+### Verifica import
+
+```bash
+PYTHONPATH=~/git/ai-agents-local/agno \
+.venv/bin/python -c "
+from config import load_settings
+from agno_service import ChiefOrchestratorGateway, AgentInput, build_agent_input
+from telegram_service import TelegramIntakeService
+print('config           OK')
+print('agno_service     OK')
+print('telegram_service OK')
+"
+```
+
+---
+
 ## Verifica finale
 
 ```bash

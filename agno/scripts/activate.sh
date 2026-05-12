@@ -10,4 +10,11 @@ if [[ ! -d "$VENV" ]]; then
 fi
 
 source "$VENV/bin/activate"
+
+# Aggiunge agno/ al PYTHONPATH per risolvere i moduli (config, agno_service, telegram_service)
+# senza conflitti con il pacchetto 'agno' installato nel venv.
+AGNO_DIR="$SCRIPT_DIR/.."
+export PYTHONPATH="${AGNO_DIR}:${PYTHONPATH:-}"
+
 echo "Ambiente attivo: $(python --version) — $(which python)"
+echo "PYTHONPATH: $PYTHONPATH"
