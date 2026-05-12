@@ -1,3 +1,4 @@
 agno
 anthropic
 ollama
+openai

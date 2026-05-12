@@ -262,6 +262,54 @@ Branch remoti confermati al momento del clone:
 
 ---
 
+## 10. Verifica ambiente (smoke test)
+
+Il test verifica l'intera catena: agno → Ollama container → modello `qwen2.5:7b`.
+
+### Dipendenza aggiuntiva
+
+Il modello Ollama di agno richiede il pacchetto `openai` (usato internamente):
+
+```bash
+.venv/bin/pip install openai
+```
+
+Aggiornare anche `requirements.txt`:
+
+```
+agno
+anthropic
+ollama
+openai
+```
+
+### Esecuzione
+
+```bash
+# Da ~/git/ai-agents-local/
+source agno/scripts/activate.sh
+python agno/tests/test_smoke.py
+```
+
+### Output atteso
+
+```
+Modello : qwen2.5:7b
+Prompt  : Dimmi ciao
+----------------------------------------
+Risposta: Ciao! Come posso aiutarti oggi?
+----------------------------------------
+SMOKE TEST PASSATO
+```
+
+### Esito
+
+| Data       | Modello      | Prompt        | Risposta                        | Esito  |
+|------------|--------------|---------------|---------------------------------|--------|
+| 2026-05-12 | qwen2.5:7b   | Dimmi ciao    | Ciao! Come posso aiutarti oggi? | PASS   |
+
+---
+
 ## Verifica finale
 
 ```bash
@@ -276,4 +324,7 @@ python -c "import agno; import anthropic; import ollama; print('OK')"
 # Ollama
 curl -s http://localhost:11434/api/tags | python -m json.tool
 docker exec ollama ollama list
+
+# Smoke test
+python agno/tests/test_smoke.py
 ```
