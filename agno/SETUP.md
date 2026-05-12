@@ -218,6 +218,50 @@ docker exec ollama ollama list
 
 ---
 
+## 9. Clonazione repository AgriMetSupport
+
+Tutti i repo vengono clonati in `~/git/` con `--no-single-branch` per includere tutti i branch remoti.
+
+```bash
+cd ~/git
+
+git clone --no-single-branch git@github.com:giulange/ETL_WeatherProg.git
+git clone --no-single-branch git@github.com:giulange/PYDBAPI.git
+git clone --no-single-branch git@github.com:giulange/agrimetsupport_cps.git
+git clone --no-single-branch git@github.com:giulange/ams-keycloak.git
+git clone --no-single-branch git@github.com:giulange/ams-meteo-mobile-app.git
+git clone --no-single-branch git@github.com:giulange/MapStore2-C035.git
+git clone --no-single-branch git@github.com:giulange/irrigation-eye.git
+git clone --no-single-branch git@github.com:giulange/weatherprog.git
+```
+
+Verificare che tutti i branch remoti siano tracciati:
+
+```bash
+for repo in ETL_WeatherProg PYDBAPI agrimetsupport_cps ams-keycloak \
+            ams-meteo-mobile-app MapStore2-C035 irrigation-eye weatherprog; do
+    echo "=== $repo ==="
+    (cd ~/git/$repo && git fetch --all && echo "  branch remoti: $(git branch -r | wc -l)")
+done
+```
+
+Branch remoti confermati al momento del clone:
+
+| Repository            | Branch remoti |
+|-----------------------|:-------------:|
+| ETL_WeatherProg       | 4             |
+| PYDBAPI               | 3             |
+| agrimetsupport_cps    | 4             |
+| ams-keycloak          | 2             |
+| ams-meteo-mobile-app  | 3             |
+| MapStore2-C035        | 3             |
+| irrigation-eye        | 21            |
+| weatherprog           | 13            |
+
+> Nota: git 1.8.3.1 (CentOS 7) non supporta `git -C <path>`. Usare subshell `(cd <path> && git ...)`.
+
+---
+
 ## Verifica finale
 
 ```bash
