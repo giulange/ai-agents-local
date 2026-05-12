@@ -1,15 +1,3 @@
-"""
-Handler Telegram adattato da agents-ai per il sistema multi-agente.
-
-Riceve messaggi Telegram (testo, audio, allegati) e li inoltra al
-Chief Orchestrator via ChiefOrchestratorGateway.
-
-Rispetto a agents-ai:
-- non dipende da agent.py (rimosso)
-- importa AgentInput e build_agent_input da agno_service
-- usa ChiefOrchestratorGateway invece di LocalAgentGateway
-- la trascrizione audio è opzionale (richiede OPENAI_API_KEY)
-"""
 from __future__ import annotations
 
 import asyncio
@@ -19,45 +7,42 @@ from telegram import Audio, Document, Message, Update, Voice
 from telegram.error import NetworkError
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
-from agno_service import AgentInput, ChiefOrchestratorGateway, build_agent_input
-from config import Settings
+from .agent import LocalAgentGateway, build_agent_input
+from .config import Settings
 
 
 LOGGER = logging.getLogger(__name__)
 
 
 class TelegramIntakeService:
-    """Riceve messaggi Telegram e li inoltra al Chief Orchestrator."""
+    """Receives Telegram messages and forwards them to the agent gateway."""
 
-    def __init__(self, settings: Settings, gateway: ChiefOrchestratorGateway) -> None:
+    def __init__(self, settings: Settings, agent_gateway: LocalAgentGateway) -> None:
         self._settings = settings
-        self._gateway = gateway
+        self._agent_gateway = agent_gateway
         self._application = Application.builder().token(settings.telegram_bot_token).build()
         self._application.add_handler(CommandHandler("start", self._handle_start))
         self._application.add_handler(
-            MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_text)
+            MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_text_message)
         )
         self._application.add_handler(
-            MessageHandler(filters.VOICE | filters.AUDIO, self._handle_audio)
+            MessageHandler(filters.VOICE | filters.AUDIO, self._handle_audio_message)
         )
         self._application.add_handler(
-            MessageHandler(filters.PHOTO | filters.Document.ALL, self._handle_attachment)
+            MessageHandler(filters.PHOTO | filters.Document.ALL, self._handle_attachment_message)
         )
-
-    # ------------------------------------------------------------------
-    # Handlers
-    # ------------------------------------------------------------------
 
     async def _handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         del context
         if not update.effective_message:
             return
         await update.effective_message.reply_text(
-            "Engineering Copilot attivo. "
-            "Invia testo, nota vocale, audio, immagine, PDF, PPTX o CSV per interagire."
+            "Telegram intake is active. Send a text, voice note, audio file, image, PDF, PPTX, or CSV to talk to the agent pipeline."
         )
 
-    async def _handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def _handle_text_message(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
         del context
         if not update.effective_chat or not update.effective_message:
             return
@@ -65,14 +50,15 @@ class TelegramIntakeService:
         chat_id = update.effective_chat.id
         text = update.effective_message.text or ""
         LOGGER.info(
-            "Messaggio Telegram chat_id=%s user_id=%s username=%s text=%r",
+            "Incoming Telegram message chat_id=%s user_id=%s username=%s text=%r",
             chat_id,
             update.effective_user.id if update.effective_user else None,
             update.effective_user.username if update.effective_user else None,
             text[:80],
         )
 
-        if not self._is_allowed(chat_id):
+        if self._settings.allowed_chat_ids and chat_id not in self._settings.allowed_chat_ids:
+            LOGGER.warning("Rejected message from unauthorized chat_id=%s", chat_id)
             return
 
         agent_input = build_agent_input(
@@ -81,16 +67,20 @@ class TelegramIntakeService:
             username=update.effective_user.username if update.effective_user else None,
             text=text,
         )
-        reply = await self._gateway.handle_message(agent_input)
+        reply = await self._agent_gateway.handle_message(agent_input)
+
         await update.effective_message.reply_text(reply)
 
-    async def _handle_audio(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def _handle_audio_message(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
         del context
         if not update.effective_chat or not update.effective_message:
             return
 
         chat_id = update.effective_chat.id
-        if not self._is_allowed(chat_id):
+        if self._settings.allowed_chat_ids and chat_id not in self._settings.allowed_chat_ids:
+            LOGGER.warning("Rejected audio from unauthorized chat_id=%s", chat_id)
             return
 
         message = update.effective_message
@@ -100,35 +90,34 @@ class TelegramIntakeService:
 
         filename, mime_type = self._resolve_audio_metadata(media)
         LOGGER.info(
-            "Audio Telegram chat_id=%s user_id=%s filename=%s mime_type=%s",
+            "Incoming Telegram audio chat_id=%s user_id=%s filename=%s mime_type=%s",
             chat_id,
             update.effective_user.id if update.effective_user else None,
-            filename, mime_type,
+            filename,
+            mime_type,
         )
 
         telegram_file = await media.get_file()
-        audio_bytes = bytes(await telegram_file.download_as_bytearray())
-        transcript = await self._gateway.transcribe_audio(
-            audio_bytes=audio_bytes,
+        audio_buffer = await telegram_file.download_as_bytearray()
+        transcript = await self._agent_gateway.transcribe_audio(
+            audio_bytes=bytes(audio_buffer),
             filename=filename,
             mime_type=mime_type,
         )
-
         if transcript is None:
             await message.reply_text(
-                "Trascrizione audio non disponibile. "
-                "Configura OPENAI_API_KEY per abilitarla, oppure invia un messaggio di testo."
+                "I could not transcribe the audio message because the transcription backend failed. Please try again."
             )
             return
+
         if not transcript:
             await message.reply_text(
-                "Nessun parlato rilevato nell'audio. Prova con una nota vocale più lunga o più chiara."
+                "I could not detect clear speech in the audio message. Try a slightly longer or louder voice note."
             )
             return
 
-        LOGGER.info("Trascrizione audio chat_id=%s text=%r", chat_id, transcript[:120])
-        await message.reply_text(f"Trascrizione: {transcript}")
-
+        LOGGER.info("Audio transcript chat_id=%s text=%r", chat_id, transcript[:120])
+        await message.reply_text(f"Transcription: {transcript}")
         agent_input = build_agent_input(
             chat_id=chat_id,
             user_id=update.effective_user.id if update.effective_user else None,
@@ -138,16 +127,19 @@ class TelegramIntakeService:
             filename=filename,
             mime_type=mime_type,
         )
-        reply = await self._gateway.handle_message(agent_input)
+        reply = await self._agent_gateway.handle_message(agent_input)
         await message.reply_text(reply)
 
-    async def _handle_attachment(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def _handle_attachment_message(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
         del context
         if not update.effective_chat or not update.effective_message:
             return
 
         chat_id = update.effective_chat.id
-        if not self._is_allowed(chat_id):
+        if self._settings.allowed_chat_ids and chat_id not in self._settings.allowed_chat_ids:
+            LOGGER.warning("Rejected attachment from unauthorized chat_id=%s", chat_id)
             return
 
         message = update.effective_message
@@ -157,28 +149,30 @@ class TelegramIntakeService:
 
         if not attachment["supported"]:
             await message.reply_text(
-                "Posso leggere immagini, PDF, PPTX e file CSV dagli allegati Telegram."
+                "I can currently read images, PDF documents, PPTX slide decks, and CSV files from Telegram attachments."
             )
             return
 
         LOGGER.info(
-            "Allegato Telegram chat_id=%s user_id=%s filename=%s mime_type=%s source=%s",
+            "Incoming Telegram attachment chat_id=%s user_id=%s filename=%s mime_type=%s source=%s",
             chat_id,
             update.effective_user.id if update.effective_user else None,
-            attachment["filename"], attachment["mime_type"], attachment["source"],
+            attachment["filename"],
+            attachment["mime_type"],
+            attachment["source"],
         )
 
         telegram_file = await attachment["media"].get_file()
-        file_bytes = bytes(await telegram_file.download_as_bytearray())
-        extracted_text = await self._gateway.extract_attachment_text(
-            file_bytes=file_bytes,
+        file_buffer = await telegram_file.download_as_bytearray()
+        extracted_text = await self._agent_gateway.extract_attachment_text(
+            file_bytes=bytes(file_buffer),
             filename=attachment["filename"],
             mime_type=attachment["mime_type"],
             caption=message.caption,
         )
         if not extracted_text:
             await message.reply_text(
-                "Non riesco a leggere questo allegato. Riprova con un file più chiaro."
+                "I could not read that attachment right now. Please try again with a clearer file."
             )
             return
 
@@ -196,56 +190,49 @@ class TelegramIntakeService:
             filename=str(attachment["filename"]),
             mime_type=attachment["mime_type"] if isinstance(attachment["mime_type"], str) else None,
         )
-        reply = await self._gateway.handle_message(agent_input)
+        reply = await self._agent_gateway.handle_message(agent_input)
         await message.reply_text(reply)
-
-    # ------------------------------------------------------------------
-    # Utilities
-    # ------------------------------------------------------------------
-
-    def _is_allowed(self, chat_id: int) -> bool:
-        if self._settings.allowed_chat_ids and chat_id not in self._settings.allowed_chat_ids:
-            LOGGER.warning("Messaggio rifiutato da chat_id=%s non autorizzato", chat_id)
-            return False
-        return True
 
     @staticmethod
     def _resolve_audio_metadata(media: Voice | Audio) -> tuple[str, str | None]:
         if isinstance(media, Voice):
             return "telegram_voice.ogg", getattr(media, "mime_type", None) or "audio/ogg"
-        return media.file_name or "telegram_audio", media.mime_type
+
+        file_name = media.file_name or "telegram_audio"
+        mime_type = media.mime_type
+        return file_name, mime_type
 
     @staticmethod
     def _resolve_attachment(message: Message) -> dict[str, object] | None:
         if message.photo:
+            photo = message.photo[-1]
             return {
-                "media": message.photo[-1],
+                "media": photo,
                 "filename": "telegram_photo.jpg",
                 "mime_type": "image/jpeg",
                 "source": "telegram_image",
                 "supported": True,
             }
+
         document: Document | None = message.document
         if document is None:
             return None
 
         filename = document.file_name or "telegram_document"
         mime_type = document.mime_type
-        name = filename.lower()
-        mime = (mime_type or "").lower()
+        normalized_name = filename.lower()
+        normalized_mime = (mime_type or "").lower()
         is_supported = (
-            mime.startswith("image/")
-            or mime == "application/pdf"
-            or mime == "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-            or mime in {"text/csv", "application/csv"}
-            or (mime == "text/plain" and name.endswith(".csv"))
-            or name.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif", ".pdf", ".pptx", ".csv"))
+            normalized_mime.startswith("image/")
+            or normalized_mime == "application/pdf"
+            or normalized_mime == "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            or normalized_mime in {"text/csv", "application/csv"}
+            or (normalized_mime == "text/plain" and normalized_name.endswith(".csv"))
+            or normalized_name.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif", ".pdf", ".pptx", ".csv"))
         )
-        source = (
-            "telegram_image"
-            if mime.startswith("image/") or name.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif"))
-            else "telegram_document"
-        )
+        source = "telegram_image" if normalized_mime.startswith("image/") or normalized_name.endswith(
+            (".png", ".jpg", ".jpeg", ".webp", ".gif")
+        ) else "telegram_document"
         return {
             "media": document,
             "filename": filename,
@@ -263,21 +250,23 @@ class TelegramIntakeService:
         extracted_text: str,
     ) -> str:
         lines = [
-            "È stato ricevuto un allegato Telegram.",
+            "A Telegram attachment was received.",
             f"Filename: {filename}",
             f"MIME type: {mime_type or 'unknown'}",
         ]
         if caption:
-            lines.append(f"Didascalia utente: {caption}")
-        lines += ["", "Contenuto estratto:", extracted_text]
+            lines.append(f"User caption: {caption}")
+        lines.extend(
+            [
+                "",
+                "Extracted attachment content:",
+                extracted_text,
+            ]
+        )
         return "\n".join(lines)
 
-    # ------------------------------------------------------------------
-    # Run
-    # ------------------------------------------------------------------
-
     def run(self) -> None:
-        LOGGER.info("Telegram intake service avviato in modalità polling.")
+        LOGGER.info("Starting Telegram intake service in polling mode.")
         try:
             asyncio.get_event_loop()
         except RuntimeError:
@@ -286,6 +275,6 @@ class TelegramIntakeService:
             self._application.run_polling(allowed_updates=Update.ALL_TYPES)
         except NetworkError as exc:
             raise RuntimeError(
-                "Avvio Telegram fallito per errore di rete. "
-                "Verifica connessione, DNS e validità del bot token."
+                "Telegram bootstrap failed due to a network error. "
+                "Check internet connectivity, DNS resolution, and bot token validity."
             ) from exc

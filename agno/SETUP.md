@@ -321,50 +321,47 @@ cd ~/git
 git clone --no-single-branch git@github.com:giulange/agents-ai.git
 ```
 
-### File creati in `agno/`
+### Decisioni di design
 
-| File | Origine | Modifiche principali |
-|---|---|---|
-| `config.py` | `agents-ai/src/agents_ai/config.py` | Rimosso OpenAI come primario; aggiunti `OLLAMA_*`, `ANTHROPIC_API_KEY`, `REPOS_BASE_DIR`; OpenAI conservato opzionale per audio |
-| `agno_service.py` | `agents-ai/src/agents_ai/agno_service.py` | Modello → Ollama qwen2.5:7b; include `AgentInput`/`build_agent_input` (erano in `agent.py`); classe rinominata `ChiefOrchestratorGateway`; step 1: sarà wrappato in `agno.team.Team` |
-| `telegram_service.py` | `agents-ai/src/agents_ai/telegram_service.py` | Rimossa dipendenza da `agent.py`; importa da `agno_service`; messaggi adattati in italiano |
+| File | Decisione |
+|---|---|
+| `config.py` | Adattato da agents-ai: `openai_api_key` opzionale, aggiunti campi Ollama/Anthropic/path |
+| `telegram_service.py` | Copiato verbatim da agents-ai — adattamento al prossimo step |
+| `agno_service.py` | Non portato — riscritto con architettura Team (vedi sezione separata) |
+| `agent.py` + `main.py` | Non portati — obsoleti con il nuovo design multi-agente |
 
-> `agent.py` e `main.py` non sono portati: saranno riscritti con l'architettura multi-agente.
+### `config.py` — modifiche rispetto a agents-ai
 
-### Nota PYTHONPATH
+1. `openai_api_key` → opzionale (default `""`, nessun `raise` se assente)
+2. Nuovi campi aggiunti a `Settings`:
 
-La cartella `agno/` ha lo stesso nome del pacchetto `agno` installato nel venv.
-Per evitare conflitti, i moduli usano import assoluti e il loader aggiunge `agno/` al `PYTHONPATH`:
-
-```bash
-# Già incluso in scripts/activate.sh
-export PYTHONPATH="~/git/ai-agents-local/agno:$PYTHONPATH"
+```python
+anthropic_api_key: str = ""
+ollama_host: str = "http://localhost:11434"
+ollama_model: str = "qwen2.5:7b"
+ollama_embedding_model: str = "nomic-embed-text"
+git_repos_base_dir: str = "~/git"
+knowledge_store_path: str = "knowledge/lancedb"
 ```
 
-### Dipendenze aggiuntive
+3. Variabili d'ambiente corrispondenti in `load_settings()`:
+   `ANTHROPIC_API_KEY`, `OLLAMA_HOST`, `OLLAMA_MODEL`, `OLLAMA_EMBEDDING_MODEL`,
+   `GIT_REPOS_BASE_DIR`, `KNOWLEDGE_STORE_PATH`
 
-Rispetto a agents-ai, aggiunte a `requirements.txt`:
+### Dipendenze aggiuntive rispetto a agents-ai
+
+Tutte installate nel venv. Su CentOS 7 servono wheel precompilate per `greenlet`:
 
 ```bash
-# Wheel precompilata necessaria su CentOS 7 (gcc 4.8 non supporta C++20 per greenlet)
+# greenlet — wheel precompilata (gcc 4.8 non supporta C++20 richiesto dalla sorgente)
 .venv/bin/pip install greenlet --only-binary=:all:
 
 .venv/bin/pip install "python-telegram-bot==21.11.1" "sqlalchemy>=2.0.0,<3.0.0" httpx ddgs
 ```
 
-### Verifica import
-
-```bash
-PYTHONPATH=~/git/ai-agents-local/agno \
-.venv/bin/python -c "
-from config import load_settings
-from agno_service import ChiefOrchestratorGateway, AgentInput, build_agent_input
-from telegram_service import TelegramIntakeService
-print('config           OK')
-print('agno_service     OK')
-print('telegram_service OK')
-"
-```
+> **duckdb** (presente in agents-ai come `duckdb==1.4.1`): non installabile su CentOS 7
+> (nessuna wheel Python 3.12, build da sorgente richiede gcc moderno).
+> Commentato in `requirements.txt` — da rivalutare se si aggiorna il sistema operativo.
 
 ---
 

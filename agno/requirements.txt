@@ -9,6 +9,7 @@ python-telegram-bot==21.11.1
 
 # Persistenza e DB
 sqlalchemy>=2.0.0,<3.0.0
+# duckdb==1.4.1   # non installabile su CentOS 7 (no wheel Python 3.12, build richiede gcc moderno)
 
 # Web e HTTP
 httpx
@@ -18,6 +19,3 @@ ddgs
 
 # Opzionale: PostgreSQL
 # psycopg-binary==3.3.3
-
-# Opzionale: DuckDB
-# duckdb
